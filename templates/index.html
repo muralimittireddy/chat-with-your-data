@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat with your PDF (Python Backend)</title>
+    <!-- 1. Load Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Simple scrollbar styling for the chat */
+        #chat-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #chat-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+
+        #chat-container::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+
+        #chat-container::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        /* Style for the "typing" cursor */
+        .typing-cursor {
+            display: inline-block;
+            width: 8px;
+            height: 1.2rem;
+            background-color: #333;
+            animation: blink 1s step-end infinite;
+            margin-left: 3px;
+            border-radius: 2px;
+        }
+
+        @keyframes blink {
+
+            from,
+            to {
+                background-color: transparent
+            }
+
+            50% {
+                background-color: #333
+            }
+        }
+    </style>
+</head>
+
+<body class="h-full bg-gray-100 flex items-center justify-center font-sans">
+
+    <div
+        class="w-full h-full sm:w-[90vw] sm:h-[90vh] max-w-4xl max-h-[800px] bg-white rounded-lg shadow-2xl flex flex-col">
+
+        <!-- ===== STATE 1: UPLOAD CONTAINER ===== -->
+        <div id="upload-container" class="flex flex-col items-center justify-center h-full p-8 text-center">
+            <h1 class="text-3xl font-bold text-gray-800 mb-4">Chat with your PDF</h1>
+            <p class="text-gray-600 mb-8 max-w-md">
+                Upload a single PDF to start a new chat. The Python backend will process it.
+            </p>
+
+            <label for="pdf-upload"
+                class="w-full max-w-md px-6 py-10 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-blue-500 hover:bg-gray-50 transition-colors">
+                <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48"
+                    aria-hidden="true">
+                    <path
+                        d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8"
+                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                </svg>
+                <span class="mt-2 block text-sm font-semibold text-blue-600">
+                    Click to upload your PDF
+                </span>
+                <span class="mt-1 block text-xs text-gray-500">PDF (MAX. 50MB)</span>
+            </label>
+            <input id="pdf-upload" type="file" class="hidden" accept="application/pdf" />
+
+            <div id="loading-indicator" class="hidden mt-8 flex flex-col items-center">
+                <svg class="animate-spin h-8 w-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none"
+                    viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                    </path>
+                </svg>
+                <p id="loading-message" class="mt-4 text-sm font-medium text-gray-700">Processing...</p>
+            </div>
+            <p id="error-message" class="hidden mt-4 text-sm font-medium text-red-600"></p>
+        </div>
+
+        <!-- ===== STATE 2: CHAT CONTAINER ===== -->
+        <div id="chat-container-wrapper" class="hidden flex-1 flex-col h-full overflow-hidden">
+            <div class="bg-gray-50 border-b border-gray-200 p-4 flex items-center justify-between">
+                <h2 id="chat-header" class="text-xl font-semibold text-gray-800 truncate"
+                    title="Chatting with document">Chatting with...</h2>
+                <button id="new-chat-btn" class="text-sm font-medium text-blue-600 hover:text-blue-800">
+                    New Chat
+                </button>
+            </div>
+
+            <div id="chat-container" class="flex-1 p-6 overflow-y-auto space-y-4">
+                <div class="flex">
+                    <div class="bg-gray-200 text-gray-800 p-3 rounded-lg max-w-xs sm:max-w-md md:max-w-lg">
+                        <p>PDF processed! Ask me anything about it.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="border-t border-gray-200 p-4 bg-white">
+                <form id="chat-form" class="flex items-center space-x-3">
+                    <input id="chat-input" type="text" placeholder="Ask a question based on the PDF..."
+                        autocomplete="off"
+                        class="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <button type="submit"
+                        class="bg-blue-600 text-white rounded-lg px-4 py-2 font-semibold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50">
+                        Send
+                    </button>
+                </form>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Main Application Logic -->
+    <script>
+        // === 1. GET UI ELEMENTS ===
+        const uploadContainer = document.getElementById('upload-container');
+        const pdfUpload = document.getElementById('pdf-upload');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const loadingMessage = document.getElementById('loading-message');
+        const errorMessage = document.getElementById('error-message');
+
+        const chatContainerWrapper = document.getElementById('chat-container-wrapper');
+        const chatHeader = document.getElementById('chat-header');
+        const chatContainer = document.getElementById('chat-container');
+        const chatForm = document.getElementById('chat-form');
+        const chatInput = document.getElementById('chat-input');
+        const newChatBtn = document.getElementById('new-chat-btn');
+
+        // === 2. APP STATE ===
+        let isAIGenerating = false;
+        let pdfName = '';
+
+        // === 3. PDF UPLOAD LOGIC ===
+        pdfUpload.addEventListener('change', handlePDFUpload);
+
+        async function handlePDFUpload(event) {
+            const file = event.target.files[0];
+            if (!file || file.type !== 'application/pdf') {
+                showError('Please upload a valid PDF file.');
+                return;
+            }
+
+            pdfName = file.name;
+            hideError();
+            setLoading(true, 'Uploading and processing PDF on server...');
+
+            const formData = new FormData();
+            formData.append('pdf-upload', file);
+
+            try {
+                // Send the PDF to the Python backend
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.error || 'Unknown error occurred');
+                }
+
+                // Success! Transition to chat UI
+                setLoading(false);
+                showChatUI();
+
+            } catch (error) {
+                console.error('Error uploading PDF:', error);
+                showError(`Error: ${error.message}`);
+                setLoading(false);
+            }
+        }
+
+
+        // === 4. CHAT LOGIC ===
+        chatForm.addEventListener('submit', handleChatSubmit);
+
+        async function handleChatSubmit(event) {
+            event.preventDefault();
+            const userInput = chatInput.value.trim();
+            if (!userInput || isAIGenerating) return;
+
+            // Add user message to UI
+            addMessageToChat('user', userInput);
+            chatInput.value = '';
+
+            // Start AI generation
+            isAIGenerating = true;
+            updateSubmitButtonState();
+            addMessageToChat('ai', '', true); // Add "typing" placeholder
+
+            try {
+                // Send the user's message to the Python backend
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ message: userInput }),
+                });
+
+                if (!response.body) {
+                    throw new Error("No response body from server.");
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let fullResponse = '';
+
+                // Stream the response from the backend
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    fullResponse += chunk;
+                    updateLastAIMessage(fullResponse, true); // Update AI message with new chunk
+                }
+
+                // Final update to remove typing cursor
+                updateLastAIMessage(fullResponse, false);
+
+            } catch (error) {
+                console.error("Error during chat:", error);
+                updateLastAIMessage("Sorry, an error occurred while connecting to the backend.");
+            } finally {
+                isAIGenerating = false;
+                updateSubmitButtonState();
+            }
+        }
+
+        // === 5. UI & UTILITY FUNCTIONS ===
+
+        function setLoading(isLoading, message = 'Processing...') {
+            if (isLoading) {
+                loadingIndicator.classList.remove('hidden');
+                loadingMessage.textContent = message;
+                uploadContainer.classList.add('opacity-50', 'pointer-events-none');
+            } else {
+                loadingIndicator.classList.add('hidden');
+                uploadContainer.classList.remove('opacity-50', 'pointer-events-none');
+            }
+        }
+
+        function showError(message) {
+            errorMessage.classList.remove('hidden');
+            errorMessage.textContent = message;
+        }
+
+        function hideError() {
+            errorMessage.classList.add('hidden');
+        }
+
+        function showChatUI() {
+            uploadContainer.classList.add('hidden');
+            chatContainerWrapper.classList.remove('hidden');
+            chatContainerWrapper.classList.add('flex');
+            chatHeader.textContent = `Chatting with ${pdfName}`;
+            chatHeader.title = `Chatting with ${pdfName}`;
+        }
+
+        newChatBtn.addEventListener('click', () => {
+            // Simply reload the page to reset everything
+            window.location.reload();
+        });
+
+        function addMessageToChat(role, text, isTyping = false) {
+            const wrapper = document.createElement('div');
+            wrapper.classList.add('flex');
+
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('p-3', 'rounded-lg', 'max-w-xs', 'sm:max-w-md', 'md:max-w-lg');
+
+            // Basic text setting (no markdown)
+            messageDiv.textContent = text;
+
+            if (role === 'user') {
+                wrapper.classList.add('justify-end');
+                messageDiv.classList.add('bg-blue-600', 'text-white');
+            } else {
+                messageDiv.classList.add('bg-gray-200', 'text-gray-800');
+                if (isTyping) {
+                    messageDiv.setAttribute('id', 'ai-typing-placeholder');
+                    const cursor = document.createElement('span');
+                    cursor.classList.add('typing-cursor');
+                    messageDiv.appendChild(cursor);
+                }
+            }
+
+            wrapper.appendChild(messageDiv);
+            chatContainer.appendChild(wrapper);
+
+            // Scroll to bottom
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function updateLastAIMessage(fullText, isTyping = false) {
+            let placeholder = document.getElementById('ai-typing-placeholder');
+            if (!placeholder) return;
+
+            // Remove the cursor to just set text content
+            const cursor = placeholder.querySelector('.typing-cursor');
+            if (cursor) {
+                placeholder.removeChild(cursor);
+            }
+
+            placeholder.textContent = fullText; // Set the streamed text
+
+            if (isTyping) {
+                const newCursor = document.createElement('span');
+                newCursor.classList.add('typing-cursor');
+                placeholder.appendChild(newCursor);
+            } else {
+                // Done streaming, remove the ID
+                placeholder.removeAttribute('id');
+            }
+
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function updateSubmitButtonState() {
+            const button = chatForm.querySelector('button[type="submit"]');
+            button.disabled = isAIGenerating;
+        }
+    </script>
+</body>
+
+</html>
